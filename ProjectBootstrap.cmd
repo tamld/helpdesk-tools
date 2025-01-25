@@ -110,6 +110,36 @@ if not exist "%WORKDIR%.gitignore" (
     ) > "%WORKDIR%.gitignore"
 )
 
+:: Create main orchestrator script
+echo Creating helpdesk-tools.cmd...
+if not exist "%WORKDIR%helpdesk-tools.cmd" (
+    (
+        echo @echo off
+        echo REM Helpdesk Tools - Main Orchestrator Script
+        echo echo ====================================================
+        echo echo          Welcome to Helpdesk Tools Orchestrator
+        echo echo ====================================================
+        echo echo [1] Install Applications
+        echo echo [2] Manage Office Utilities
+        echo echo [3] Perform System Utilities
+        echo echo [4] View Logs
+        echo echo [5] Manage Packages (Winget/Chocolatey)
+        echo echo [6] Update Script
+        echo echo [7] Exit
+        echo echo ====================================================
+        echo set /p choice="Enter your choice: "
+        echo if "%choice%"=="1" echo Placeholder for Install Applications
+        echo if "%choice%"=="2" echo Placeholder for Manage Office Utilities
+        echo if "%choice%"=="3" echo Placeholder for Perform System Utilities
+        echo if "%choice%"=="4" echo Placeholder for View Logs
+        echo if "%choice%"=="5" echo Placeholder for Manage Packages
+        echo if "%choice%"=="6" echo Placeholder for Update Script
+        echo if "%choice%"=="7" exit
+        echo echo Invalid choice. Please try again.
+        echo pause
+    ) > "%WORKDIR%helpdesk-tools.cmd"
+)
+
 :: Create module scripts if they don't exist
 echo Creating module scripts...
 if not exist "%MODULEDIR%\software.cmd" (
