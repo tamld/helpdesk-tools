@@ -1,0 +1,6 @@
+# Winget Manifest for utilities
+apps:
+  - id: Example.App1
+    name: Example Application 1
+  - id: Example.App2
+    name: Example Application 2

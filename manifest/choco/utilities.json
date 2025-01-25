@@ -1,0 +1,6 @@
+{
+    "apps": [
+        { "id": "exampleapp1", "name": "Example Application 1" },
+        { "id": "exampleapp2", "name": "Example Application 2" }
+    ]
+}

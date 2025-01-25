@@ -1,13 +1,10 @@
 {
     "log_level": "debug",
-    "github_base_url": "https://raw.githubusercontent.com/<username>/<repo>/main/",
+    "github_base_url": "https://github.com/tamld/helpdesk-tools",
+    "manifest_dir": "C:\Users\Administrator\github\helpdesk-tools\manifest",
     "files": {
-        "main_cmd": "main.cmd",
-        "software_module": "modules/software.cmd",
-        "system_module": "modules/system.cmd",
-        "office_module": "modules/office.cmd",
-        "utils_module": "modules/utils.cmd",
-        "winget_config": "config/winget.yaml",
-        "choco_config": "config/choco.json"
+        "main_cmd": "helpdesk-tools.cmd",
+        "winget_manifests": "C:\Users\Administrator\github\helpdesk-tools\manifest\winget",
+        "choco_manifests": "C:\Users\Administrator\github\helpdesk-tools\manifest\choco"
     }
 }
