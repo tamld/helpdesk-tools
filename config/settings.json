@@ -1,0 +1,13 @@
+{
+    "log_level": "debug",
+    "github_base_url": "https://raw.githubusercontent.com/<username>/<repo>/main/",
+    "files": {
+        "main_cmd": "main.cmd",
+        "software_module": "modules/software.cmd",
+        "system_module": "modules/system.cmd",
+        "office_module": "modules/office.cmd",
+        "utils_module": "modules/utils.cmd",
+        "winget_config": "config/winget.yaml",
+        "choco_config": "config/choco.json"
+    }
+}
