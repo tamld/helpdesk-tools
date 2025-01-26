@@ -6,6 +6,9 @@ logs/
 temp/
 *.tmp
 
+# Ignore project stucture files, exclude [path, sha, url]
+config/project_structure.json
+
 # Ignore system files
 Thumbs.db
 .DS_Store

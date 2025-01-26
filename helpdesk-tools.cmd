@@ -1,11 +1,4 @@
 @echo off
-:: ========================================================
-:: Helpdesk Tools - Full Script with Integrated Package Management and OS Info
-:: ========================================================
-
-:: --------------------------
-:: Check Administrator Rights
-:: --------------------------
 >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
 if '%errorlevel%' NEQ '0' (
     echo [Error] Please run as Administrator!
@@ -19,12 +12,14 @@ CD /D "%~dp0"
 
 :: Define directories
 set "workDir=%~dp0"
-set "configDir=%workDir%config"
-set "manifestDir=%workDir%manifest"
+set "targetDir=%workDir%helpdesk-tools"
+set "configDir=%targetDir%\config"
+set "manifestDir=%targetDir%\manifest"
 set "wingetDir=%manifestDir%\winget"
 set "chocoDir=%manifestDir%\choco"
-set "moduleDir=%workDir%modules"
-set "tempDir=%workDir%temp"
+set "moduleDir=%targetDir%\modules"
+set "tempDir=%targetDir%\temp"
+set "projectManifest=%configDir%\project_manifest.json"
 
 :: Initialize temp directory
 if not exist "%tempDir%" (
@@ -42,24 +37,36 @@ echo          Welcome to Helpdesk Tools
 echo ================================================
 
 :: 1. System Validation and OS Info
+echo Checking System Requirements...
 call :checkRequirements
 if not "%requirementsMet%"=="true" (
     echo [Error] System does not meet requirements. Exiting...
     exit /B 1
 )
+echo.
+ping -n 3 localhost > nul
+cls
 
 :: 2. User Agreement
+echo Showing User Disclaimer...
 call :showDisclaimer || exit /B 1
+cls
 
-:: 3. Initialize Package Managers (Winget/Chocolatey)
-call :checkPackageManagers
-if "%pmExit%"=="true" (
-    echo [Error] Winget or Chocolatey setup was not completed. Exiting...
+:: 3. Fetch API, Create Structure, Install Package Managers
+echo Setting up Environment (Fetching Files, Package Managers)...
+call :setupEnvironment
+if "%setupExit%"=="true" (
+    echo [Error] Environment setup was not completed. Exiting...
     exit /B 1
 )
+cls
+goto mainMenu
 
 :: 4. Validate structure and files
+echo Validating Directory Structure...
 call :validateStructure || exit /B 1
+cls
+
 
 :: ==================
 :: Main Menu
@@ -84,7 +91,7 @@ if %ERRORLEVEL% == 5 goto packageManagementMenu
 if %ERRORLEVEL% == 4 goto utilitiesMenu
 if %ERRORLEVEL% == 3 goto activeLicensesMenu
 if %ERRORLEVEL% == 2 goto officeWindowsMenu
-if %ERRORLEVEL% == 1 goto installAioMenu
+if %ERRORLEVEL% == 1 goto fullDeploymentMenu
 
 goto :mainMenu
 
@@ -93,6 +100,7 @@ goto :mainMenu
 :: ========================================================
 
 :checkRequirements
+cls
 echo Checking system requirements...
 set "requirementsMet=true"
 for /f "tokens=2 delims=," %%A in ('wmic os get Caption /format:csv ^| findstr /v "Caption"') do set "os_caption=%%A"
@@ -111,9 +119,15 @@ if /i "%os_arch%"=="ARM64" (
     echo [Error] System architecture is ARM64. Not supported.
     set "requirementsMet=false"
 )
+
+if "%requirementsMet%"=="true" (
+    echo [OK] System requirements met.
+)
+
 exit /B 0
 
 :showDisclaimer
+cls
 echo IMPORTANT: This script relies on Winget for core functionality.
 echo Winget is a native app on Windows 11 but may not be installed on Windows 10.
 echo Chocolatey is an optional package manager that can enhance the script's capabilities.
@@ -132,6 +146,133 @@ if errorlevel 2 (
 )
 exit /B 0
 
+:setupEnvironment
+set "setupExit=false"
+set "REPO_OWNER=tamld"
+set "REPO_NAME=helpdesk-tools"
+set "BRANCH=main"
+set "API_URL=https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/git/trees/%BRANCH%?recursive=1"
+set "BASE_RAW_URL=https://raw.githubusercontent.com/%REPO_OWNER%/%REPO_NAME%/%BRANCH%"
+
+:: Create target directory if it doesn't exist
+if not exist "%targetDir%" (
+    echo Creating target directory: %targetDir%
+    mkdir "%targetDir%"
+) else (
+    echo Target directory already exists: %targetDir%
+)
+
+:: Create config directory if it doesn't exist
+if not exist "%configDir%" (
+    echo Creating config directory: %configDir%
+    mkdir "%configDir%"
+) else (
+    echo Config directory already exists: %configDir%
+)
+
+:: Fetch repository structure from GitHub
+echo [1/3] Fetching repository structure from GitHub...
+powershell -NoProfile -Command ^
+  "$apiUrl = '%API_URL%';" ^
+  "$headers = @{'User-Agent'='RepoSyncTool'};" ^
+  "try {" ^
+  "   $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -ErrorAction Stop;" ^
+  "   $response.tree | ConvertTo-Json -Depth 10 | Out-File 'temp.json' -Encoding UTF8;" ^
+  "} catch {" ^
+  "   Write-Host '[ERROR] Could not connect to GitHub: ' $_.Exception.Message;" ^
+  "   exit 1;" ^
+  "}"
+
+if not exist "temp.json" (
+    echo [ERROR] Could not fetch repository structure
+    set "setupExit=true"
+    exit /B 1
+)
+
+:: Process and Download Files
+echo [2/3] Synchronizing files...
+set "FAIL_COUNT=0"
+
+powershell -NoProfile -Command ^
+  "$manifest = @();" ^
+  "$data = Get-Content 'temp.json' | ConvertFrom-Json;" ^
+  "foreach ($item in $data) {" ^
+  "    if ($item.type -eq 'blob' -and $item.path -notmatch '^temp/') {" ^
+  "        $fileEntry = @{" ^
+  "            path = $item.path;" ^
+  "            sha  = $item.sha;" ^
+  "            url  = '%BASE_RAW_URL%/' + $item.path;" ^
+  "        };" ^
+  "        $filePath = Join-Path -Path '%targetDir%' -ChildPath $item.path;" ^
+  "        $dirPath = [System.IO.Path]::GetDirectoryName($filePath);" ^
+  "        if (-not (Test-Path $dirPath)) { New-Item -ItemType Directory -Path $dirPath | Out-Null };" ^
+  "        try {" ^
+  "            Invoke-WebRequest $fileEntry.url -OutFile $filePath -ErrorAction Stop;" ^
+  "            $manifest += $fileEntry;" ^
+  "            Write-Host '[SUCCESS] Downloaded: ' $fileEntry.path;" ^
+  "        } catch {" ^
+  "            Write-Host '[ERROR] Could not download: ' $fileEntry.url;" ^
+  "            $script:FAIL_COUNT++;" ^
+  "        }" ^
+  "    }" ^
+  "};" ^
+  "$manifest | ConvertTo-Json -Depth 4 | Out-File '%projectManifest%' -Encoding UTF8;" ^
+  "exit $FAIL_COUNT"
+
+set "FAIL_RESULT=%ERRORLEVEL%"
+del temp.json 2>nul
+
+if %FAIL_RESULT% gtr 0 (
+    echo [Error] Some files failed to download.
+    set "setupExit=true"
+    exit /B 1
+)
+
+:: After successful download
+if %FAIL_RESULT% equ 0 (
+    echo [SUCCESS] All files downloaded
+    if /i "%CURRENT_DIR%" neq "%PROJECT_ROOT%" (
+        echo Restarting from project directory...
+        start "" /D "%targetDir%" "helpdesk-tools.cmd"
+        exit /B 0
+    )
+)
+
+:: Install Package Managers
+call :checkPackageManagers
+if "%pmExit%"=="true" (
+    echo [Error] Winget or Chocolatey setup was not completed.
+    set "setupExit=true"
+    exit /B 1
+)
+
+exit /B 0
+
+:setupPortableMode
+echo Initializing portable mode...
+set "TARGET_DIR=%cd%\%PROJECT_ROOT%"
+
+:: Create directory structure
+set "DIR_STRUCTURE=config manifest\winget manifest\choco modules logs temp"
+for %%D in (%DIR_STRUCTURE%) do (
+    if not exist "%TARGET_DIR%\%%D" mkdir "%TARGET_DIR%\%%D"
+)
+
+:: Download core files
+echo Downloading core files from GitHub...
+powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest 'https://raw.githubusercontent.com/tamld/helpdesk-tools/main/helpdesk-tools.cmd' -OutFile '%TARGET_DIR%\helpdesk-tools.cmd'"
+
+:: Restart script from new location
+if exist "%TARGET_DIR%\helpdesk-tools.cmd" (
+    echo Restarting script from project directory...
+    start "" /D "%TARGET_DIR%" "helpdesk-tools.cmd"
+    exit /B 0
+) else (
+    echo [ERROR] Failed to download main script
+    pause
+    exit /B 1
+)
+
 :checkPackageManagers
 set "pmExit=false"
 set "wingetInstalled=false"
@@ -143,15 +284,15 @@ if %ERRORLEVEL%==0 (
     echo Winget is found on this system.
     set "wingetInstalled=true"
 ) else (
+	cls
     echo Winget is required for core functionality.
-    choice /C YN /N /M "Do you want to install Winget? (Y/N): "
+    choice /C YN /N /M "Do you want to install Winget? Press N to exit script (Y/N): "
     if errorlevel 2 (
         echo [Error] Winget is not installed. Cannot proceed.
         set "pmExit=true"
         exit /B 1
     ) else (
-        call :installXamlFramework || goto wingetInstallError
-        call :installWinget || exit /B 1
+        call :installWinget  :: Directly call installWinget which now includes XAML
     )
 )
 
@@ -162,7 +303,7 @@ if %ERRORLEVEL%==0 (
     set "chocoInstalled=true"
 ) else (
     echo Chocolatey is optional but recommended for additional features.
-    choice /C YN /N /M "Do you want to install Chocolatey? (Y/N): "
+    choice /C YN /N /M "Do you want to install Chocolatey? Press N to exit script (Y/N): "
     if errorlevel 2 (
         echo Skipping Chocolatey installation.
     ) else (
@@ -171,9 +312,13 @@ if %ERRORLEVEL%==0 (
 )
 exit /B 0
 
-:installXamlFramework
+
+:installWinget
+echo Installing Winget and required components...
+
+:: Install XAML Framework
 echo Checking Microsoft.UI.Xaml requirements...
-where winget >nul 2>&1 && exit /B 0
+where winget >nul 2>&1 && goto installWingetCore  :: If winget exists, skip XAML install
 
 :: Get latest stable version
 echo Fetching latest Microsoft.UI.Xaml version...
@@ -186,7 +331,7 @@ if "%XAML_VERSION%"=="" (
 
 echo Latest stable version: %XAML_VERSION%
 
-:: Download and install
+:: Download and install XAML
 set "xamlUrl=https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/%XAML_VERSION%"
 set "xamlPackage=%tempDir%\xaml.zip"
 
@@ -203,9 +348,9 @@ if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "arch=arm64"
 echo Installing Microsoft.UI.Xaml for %arch% architecture...
 powershell -Command "Add-AppxPackage -Path '%tempDir%\xaml\tools\AppX\%arch%\Release\Microsoft.UI.Xaml.2.8.appx'"
 del /q "%xamlPackage%" 2>nul
-exit /B 0
+:: End XAML Installation
 
-:installWinget
+:installWingetCore
 echo Installing Winget...
 set "wingetBundle=%tempDir%\winget.msixbundle"
 powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%wingetBundle%'"
@@ -219,7 +364,8 @@ exit /B 0
 
 :installChoco
 echo Installing Chocolatey...
-powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" >nul
+::powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" >nul
+choco -v > NUL 2>&1 || powershell Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))&&set "path=%path%;C:\ProgramData\chocolatey\bin"
 where choco >nul 2>&1 || (
     echo [Warning] Chocolatey installation failed.
     exit /B 0
@@ -230,6 +376,7 @@ exit /B 0
 echo Validating directory structure...
 set "errorFlag=0"
 set "items=%configDir% %manifestDir% %wingetDir% %chocoDir% %moduleDir%"
+set "categories=software office utils"
 for %%C in (%categories%) do (
     set "items=%items% %wingetDir%\%%C.yaml"
     set "items=%items% %chocoDir%\%%C.json"
