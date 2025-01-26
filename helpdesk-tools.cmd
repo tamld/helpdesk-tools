@@ -22,9 +22,18 @@ set "tempDir=%targetDir%\temp"
 set "projectManifest=%configDir%\project_manifest.json"
 
 :: Initialize temp directory
+:: Note: The script already creates 'helpdesk-tools' folder before creating 'temp' folder inside it.
+:: The logic below ensures 'temp' folder is created inside 'helpdesk-tools' if 'helpdesk-tools' exists or is created.
+if not exist "%targetDir%" (
+    mkdir "%targetDir%" || (
+        echo [ERROR] Failed to create helpdesk-tools directory
+        pause
+        exit /B 1
+    )
+)
 if not exist "%tempDir%" (
     mkdir "%tempDir%" || (
-        echo [ERROR] Failed to create temp directory
+        echo [ERROR] Failed to create temp directory inside helpdesk-tools
         pause
         exit /B 1
     )
@@ -128,18 +137,14 @@ exit /B 0
 
 :showDisclaimer
 cls
-echo IMPORTANT: This script relies on Winget for core functionality.
-echo Winget is a native app on Windows 11 but may not be installed on Windows 10.
-echo Chocolatey is an optional package manager that can enhance the script's capabilities.
+echo IMPORTANT: This script uses Winget and optionally Chocolatey.
+echo SECURITY WARNING: Running scripts involves risks.
+echo - Script modifications are your responsibility.
+echo - This script will install software and change system settings.
+echo - The author is not liable for any issues.
+echo - No harm is intended by the script author.
 echo.
-echo SECURITY WARNING: Please be aware of the security implications of running scripts.
-echo The script owner is not responsible for any damage or issues caused by modified or edited scripts.
-echo.
-echo By proceeding, you acknowledge that you understand the following:
-echo - You are aware that this script will execute code to fine-tune, optimize, and install software on your system.
-echo - The script author has no intent to attack, harm, or damage your system.
-echo.
-choice /C YN /N /M "Do you agree to proceed with this script? (Y/N): "
+choice /C YN /N /M "Do you agree to proceed? (Y/N): "
 if errorlevel 2 (
     echo You chose NOT to proceed. Exiting...
     exit /B 1
@@ -170,6 +175,15 @@ if not exist "%configDir%" (
     echo Config directory already exists: %configDir%
 )
 
+:: Initialize temp directory
+if not exist "%tempDir%" (
+    mkdir "%tempDir%" || (
+        echo [ERROR] Failed to create temp directory
+        pause
+        exit /B 1
+    )
+)
+
 :: Fetch repository structure from GitHub
 echo [1/3] Fetching repository structure from GitHub...
 powershell -NoProfile -Command ^
@@ -177,13 +191,14 @@ powershell -NoProfile -Command ^
   "$headers = @{'User-Agent'='RepoSyncTool'};" ^
   "try {" ^
   "   $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -ErrorAction Stop;" ^
-  "   $response.tree | ConvertTo-Json -Depth 10 | Out-File 'temp.json' -Encoding UTF8;" ^
+  "   $response.tree | ConvertTo-Json -Depth 10 | Out-File '%tempDir%\temp.json' -Encoding UTF8;" ^
   "} catch {" ^
   "   Write-Host '[ERROR] Could not connect to GitHub: ' $_.Exception.Message;" ^
   "   exit 1;" ^
   "}"
 
-if not exist "temp.json" (
+:: Check if temp.json was created in the temp directory
+if not exist "%tempDir%\temp.json" (
     echo [ERROR] Could not fetch repository structure
     set "setupExit=true"
     exit /B 1
@@ -195,7 +210,7 @@ set "FAIL_COUNT=0"
 
 powershell -NoProfile -Command ^
   "$manifest = @();" ^
-  "$data = Get-Content 'temp.json' | ConvertFrom-Json;" ^
+  "$data = Get-Content '%tempDir%\temp.json' | ConvertFrom-Json;" ^
   "foreach ($item in $data) {" ^
   "    if ($item.type -eq 'blob' -and $item.path -notmatch '^temp/') {" ^
   "        $fileEntry = @{" ^
@@ -220,7 +235,7 @@ powershell -NoProfile -Command ^
   "exit $FAIL_COUNT"
 
 set "FAIL_RESULT=%ERRORLEVEL%"
-del temp.json 2>nul
+del "%tempDir%\temp.json" 2>nul
 
 if %FAIL_RESULT% gtr 0 (
     echo [Error] Some files failed to download.
@@ -355,7 +370,9 @@ echo Installing Winget...
 set "wingetBundle=%tempDir%\winget.msixbundle"
 powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%wingetBundle%'"
 powershell -Command "Add-AppxPackage -Path '%wingetBundle%' -ForceApplicationShutdown"
+set "PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WindowsApps"
 del /q "%wingetBundle%" 2>nul
+rd /q /s %tempDir%\xaml
 where winget >nul 2>&1 || (
     echo [Error] Failed to install Winget.
     exit /B 1
