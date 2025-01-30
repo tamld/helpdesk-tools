@@ -1,5 +1,6 @@
 @echo off
 REM Utility Module
 :Debug
-    echo Debugging tools...
-    exit /B
+echo Debugging tools...
+PAUSE
+exit /B
