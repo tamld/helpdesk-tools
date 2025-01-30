@@ -1,8 +1,16 @@
 @echo off
+set silentMode=false
+
+:: Check for silent mode parameter
+for %%x in (%*) do (
+    if /i "%%x"=="-s" set silentMode=true
+    if /i "%%x"=="--silent" set silentMode=true
+)
+
 >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
 if '%errorlevel%' NEQ '0' (
     echo [Error] Please run as Administrator!
-    pause
+    if not "%silentMode%"=="true" pause
     goto goUac
 )
 
@@ -22,19 +30,17 @@ set "tempDir=%targetDir%\temp"
 set "projectManifest=%configDir%\project_manifest.json"
 
 :: Initialize temp directory
-:: Note: The script already creates 'helpdesk-tools' folder before creating 'temp' folder inside it.
-:: The logic below ensures 'temp' folder is created inside 'helpdesk-tools' if 'helpdesk-tools' exists or is created.
 if not exist "%targetDir%" (
     mkdir "%targetDir%" || (
         echo [ERROR] Failed to create helpdesk-tools directory
-        pause
+        if not "%silentMode%"=="true" pause
         exit /B 1
     )
 )
 if not exist "%tempDir%" (
     mkdir "%tempDir%" || (
         echo [ERROR] Failed to create temp directory inside helpdesk-tools
-        pause
+        if not "%silentMode%"=="true" pause
         exit /B 1
     )
 )
@@ -50,6 +56,7 @@ echo Checking System Requirements...
 call :checkRequirements
 if not "%requirementsMet%"=="true" (
     echo [Error] System does not meet requirements. Exiting...
+    if not "%silentMode%"=="true" pause
     exit /B 1
 )
 echo.
@@ -66,43 +73,49 @@ echo Setting up Environment (Fetching Files, Package Managers)...
 call :setupEnvironment
 if "%setupExit%"=="true" (
     echo [Error] Environment setup was not completed. Exiting...
+     if not "%silentMode%"=="true" pause
     exit /B 1
 )
 cls
-goto mainMenu
 
-:: 4. Validate structure and files
-echo Validating Directory Structure...
-call :validateStructure || exit /B 1
-cls
+:: Install Package Managers
+call :checkPackageManagers
+if "%pmExit%"=="true" (
+    echo [Error] Winget or Chocolatey setup was not completed. Exiting...
+    if not "%silentMode%"=="true" pause
+    exit /B 1
+)
+goto mainLoop
 
 
 :: ==================
-:: Main Menu
+:: Main Menu and Navigation
+:mainLoop
+call :mainMenu
+goto mainLoop
+
 :mainMenu
 cls
 echo    ========================================================
-echo    [1] Install All In One Online                  : Press 1
-echo    [2] Windows Office Utilities                   : Press 2
-echo    [3] Active Licenses                            : Press 3
-echo    [4] Utilities                                  : Press 4
-echo    [5] Package Management                         : Press 5
-echo    [6] Update CMD                                 : Press 6
-echo    [7] Exit                                       : Press 7
+echo    [1] Software Deployment                         : Press 1
+echo    [2] System Utilities                           : Press 2
+echo    [3] Package Management                         : Press 3
+echo    [4] Update CMD                                 : Press 4
+echo    [5] Exit                                       : Press 5
 echo    ========================================================
 
-choice /N /C 1234567 /M "Your choice is :"
+if "%silentMode%"=="true" (
+    echo Running in Silent Mode. Type 5 and Press Enter to Exit
+)
+choice /N /C 12345 /M "Your choice is: "
 echo.
 
-if %ERRORLEVEL% == 7 call :clean & exit /B 0
-if %ERRORLEVEL% == 6 call :updateCmd & goto mainMenu
-if %ERRORLEVEL% == 5 goto packageManagementMenu
-if %ERRORLEVEL% == 4 goto utilitiesMenu
-if %ERRORLEVEL% == 3 goto activeLicensesMenu
-if %ERRORLEVEL% == 2 goto officeWindowsMenu
-if %ERRORLEVEL% == 1 goto fullDeploymentMenu
-
-goto :mainMenu
+if %errorlevel% == 5 call :clean & goto exit
+if %errorlevel% == 4 call :updateCmd & goto mainMenu
+if %errorlevel% == 3 goto packageManagementMenu & goto mainMenu
+if %errorlevel% == 2 goto utilitiesMenu & goto mainMenu
+if %errorlevel% == 1 goto softwareDeploymentMenu & goto mainMenu
+goto mainMenu
 
 :: ========================================================
 :: Function Definitions
@@ -144,149 +157,92 @@ echo - This script will install software and change system settings.
 echo - The author is not liable for any issues.
 echo - No harm is intended by the script author.
 echo.
-choice /C YN /N /M "Do you agree to proceed? (Y/N): "
-if errorlevel 2 (
-    echo You chose NOT to proceed. Exiting...
-    exit /B 1
+
+if "%silentMode%"=="true" (
+    echo Proceeding with script execution in silent mode as disclaimer is assumed to be accepted.
+    exit /B 0
+) else (
+    choice /C YN /N /M "Do you agree to proceed? (Y/N): "
+    if errorlevel 2 (
+        echo You chose NOT to proceed. Exiting...
+        exit /B 1
+    )
+    exit /B 0
 )
-exit /B 0
 
 :setupEnvironment
 set "setupExit=false"
-set "REPO_OWNER=tamld"
-set "REPO_NAME=helpdesk-tools"
-set "BRANCH=main"
-set "API_URL=https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/git/trees/%BRANCH%?recursive=1"
-set "BASE_RAW_URL=https://raw.githubusercontent.com/%REPO_OWNER%/%REPO_NAME%/%BRANCH%"
+set "REPO_URL=https://github.com/tamld/helpdesk-tools/archive/refs/heads/main.zip"
+set "ZIP_FILE=%temp%\repo.zip"
+set "EXTRACT_DIR=%tempDir%\repo"
 
-:: Create target directory if it doesn't exist
-if not exist "%targetDir%" (
-    echo Creating target directory: %targetDir%
-    mkdir "%targetDir%"
-) else (
-    echo Target directory already exists: %targetDir%
-)
-
-:: Create config directory if it doesn't exist
-if not exist "%configDir%" (
-    echo Creating config directory: %configDir%
-    mkdir "%configDir%"
-) else (
-    echo Config directory already exists: %configDir%
-)
-
-:: Initialize temp directory
+:: Create temp directory
 if not exist "%tempDir%" (
     mkdir "%tempDir%" || (
         echo [ERROR] Failed to create temp directory
-        pause
+        if not "%silentMode%"=="true" pause
+        set "setupExit=true"
         exit /B 1
     )
 )
 
-:: Fetch repository structure from GitHub
-echo [1/3] Fetching repository structure from GitHub...
-powershell -NoProfile -Command ^
-  "$apiUrl = '%API_URL%';" ^
-  "$headers = @{'User-Agent'='RepoSyncTool'};" ^
-  "try {" ^
-  "   $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -ErrorAction Stop;" ^
-  "   $response.tree | ConvertTo-Json -Depth 10 | Out-File '%tempDir%\temp.json' -Encoding UTF8;" ^
-  "} catch {" ^
-  "   Write-Host '[ERROR] Could not connect to GitHub: ' $_.Exception.Message;" ^
-  "   exit 1;" ^
-  "}"
-
-:: Check if temp.json was created in the temp directory
-if not exist "%tempDir%\temp.json" (
-    echo [ERROR] Could not fetch repository structure
-    set "setupExit=true"
-    exit /B 1
-)
-
-:: Process and Download Files
-echo [2/3] Synchronizing files...
-set "FAIL_COUNT=0"
-
-powershell -NoProfile -Command ^
-  "$manifest = @();" ^
-  "$data = Get-Content '%tempDir%\temp.json' | ConvertFrom-Json;" ^
-  "foreach ($item in $data) {" ^
-  "    if ($item.type -eq 'blob' -and $item.path -notmatch '^temp/') {" ^
-  "        $fileEntry = @{" ^
-  "            path = $item.path;" ^
-  "            sha  = $item.sha;" ^
-  "            url  = '%BASE_RAW_URL%/' + $item.path;" ^
-  "        };" ^
-  "        $filePath = Join-Path -Path '%targetDir%' -ChildPath $item.path;" ^
-  "        $dirPath = [System.IO.Path]::GetDirectoryName($filePath);" ^
-  "        if (-not (Test-Path $dirPath)) { New-Item -ItemType Directory -Path $dirPath | Out-Null };" ^
-  "        try {" ^
-  "            Invoke-WebRequest $fileEntry.url -OutFile $filePath -ErrorAction Stop;" ^
-  "            $manifest += $fileEntry;" ^
-  "            Write-Host '[SUCCESS] Downloaded: ' $fileEntry.path;" ^
-  "        } catch {" ^
-  "            Write-Host '[ERROR] Could not download: ' $fileEntry.url;" ^
-  "            $script:FAIL_COUNT++;" ^
-  "        }" ^
-  "    }" ^
-  "};" ^
-  "$manifest | ConvertTo-Json -Depth 4 | Out-File '%projectManifest%' -Encoding UTF8;" ^
-  "exit $FAIL_COUNT"
-
-set "FAIL_RESULT=%ERRORLEVEL%"
-del "%tempDir%\temp.json" 2>nul
-
-if %FAIL_RESULT% gtr 0 (
-    echo [Error] Some files failed to download.
-    set "setupExit=true"
-    exit /B 1
-)
-
-:: After successful download
-if %FAIL_RESULT% equ 0 (
-    echo [SUCCESS] All files downloaded
-    if /i "%CURRENT_DIR%" neq "%PROJECT_ROOT%" (
-        echo Restarting from project directory...
-        start "" /D "%targetDir%" "helpdesk-tools.cmd"
-        exit /B 0
+:: Delete old content
+echo Deleting old content from target directory...
+if exist "%targetDir%" (
+    for /f "delims=" %%i in ('dir /b /ad "%targetDir%"') do (
+        rd /s /q "%targetDir%\%%i"
+    )
+     for /f "delims=" %%i in ('dir /b "%targetDir%"') do (
+       if not "%%i"=="temp" if not "%%i"=="helpdesk-tools.cmd" del /f /q "%targetDir%\%%i"
     )
 )
 
-:: Install Package Managers
-call :checkPackageManagers
-if "%pmExit%"=="true" (
-    echo [Error] Winget or Chocolatey setup was not completed.
+:: Download ZIP file with try-catch
+echo [1/2] Downloading repository ZIP file...
+powershell -NoProfile -Command ^
+    "try { " ^
+    "   $ProgressPreference='SilentlyContinue'; " ^
+    "   Invoke-WebRequest -Uri '%REPO_URL%' -OutFile '%ZIP_FILE%' -ErrorAction Stop; " ^
+    "} catch { " ^
+    "   Write-Host '[ERROR] Failed to download repository ZIP file: ' $_.Exception.Message; " ^
+    "   exit 1; " ^
+    "}"
+if %errorlevel% neq 0 (
     set "setupExit=true"
     exit /B 1
 )
 
-exit /B 0
-
-:setupPortableMode
-echo Initializing portable mode...
-set "TARGET_DIR=%cd%\%PROJECT_ROOT%"
-
-:: Create directory structure
-set "DIR_STRUCTURE=config manifest\winget manifest\choco modules logs temp"
-for %%D in (%DIR_STRUCTURE%) do (
-    if not exist "%TARGET_DIR%\%%D" mkdir "%TARGET_DIR%\%%D"
-)
-
-:: Download core files
-echo Downloading core files from GitHub...
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest 'https://raw.githubusercontent.com/tamld/helpdesk-tools/main/helpdesk-tools.cmd' -OutFile '%TARGET_DIR%\helpdesk-tools.cmd'"
-
-:: Restart script from new location
-if exist "%TARGET_DIR%\helpdesk-tools.cmd" (
-    echo Restarting script from project directory...
-    start "" /D "%TARGET_DIR%" "helpdesk-tools.cmd"
-    exit /B 0
-) else (
-    echo [ERROR] Failed to download main script
-    pause
+:: Extract ZIP file with try-catch
+echo [2/2] Extracting repository ZIP file...
+powershell -NoProfile -Command ^
+    "try { " ^
+    "   Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force -ErrorAction Stop; " ^
+    "} catch { " ^
+     "   Write-Host '[ERROR] Failed to extract repository ZIP file: ' $_.Exception.Message; " ^
+    "   exit 1; " ^
+    "}"
+if %errorlevel% neq 0 (
+    set "setupExit=true"
+    del "%ZIP_FILE%"
     exit /B 1
 )
+
+:: Delete the zip file
+del "%ZIP_FILE%"
+
+:: Move extracted content to target dir
+for /d %%d in ("%EXTRACT_DIR%\helpdesk-tools-main\*") do move "%%d" "%targetDir%" >nul
+for %%f in ("%EXTRACT_DIR%\helpdesk-tools-main\*") do move "%%f" "%targetDir%" >nul
+rd /s /q "%EXTRACT_DIR%\helpdesk-tools-main"
+
+:: Create project_manifest.json
+echo Creating project_manifest.json...
+powershell -NoProfile -Command ^
+    "$manifest = @{ 'downloaded_at' = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ');};" ^
+    "$manifest | ConvertTo-Json -Depth 4 | Out-File '%projectManifest%' -Encoding UTF8;"
+
+exit /B 0
+
 
 :checkPackageManagers
 set "pmExit=false"
@@ -301,13 +257,18 @@ if %ERRORLEVEL%==0 (
 ) else (
 	cls
     echo Winget is required for core functionality.
-    choice /C YN /N /M "Do you want to install Winget? Press N to exit script (Y/N): "
-    if errorlevel 2 (
-        echo [Error] Winget is not installed. Cannot proceed.
-        set "pmExit=true"
-        exit /B 1
-    ) else (
+    if "%silentMode%"=="true" (
+        echo Silent mode: Proceeding with Winget installation.
         call :installWinget  :: Directly call installWinget which now includes XAML
+    ) else (
+        choice /C YN /N /M "Do you want to install Winget? Press N to exit script (Y/N): "
+        if errorlevel 2 (
+            echo [Error] Winget is not installed. Cannot proceed.
+            set "pmExit=true"
+            exit /B 1
+        ) else (
+            call :installWinget  :: Directly call installWinget which now includes XAML
+        )
     )
 )
 
@@ -317,12 +278,18 @@ if %ERRORLEVEL%==0 (
     echo Chocolatey is found on this system.
     set "chocoInstalled=true"
 ) else (
-    echo Chocolatey is optional but recommended for additional features.
-    choice /C YN /N /M "Do you want to install Chocolatey? Press N to exit script (Y/N): "
-    if errorlevel 2 (
-        echo Skipping Chocolatey installation.
-    ) else (
+  if "%silentMode%"=="true" (
+       echo Chocolatey is not found on this system.
+        echo Silent mode: Proceeding with Chocolatey installation.
         call :installChoco
+     ) else (
+        echo Chocolatey is optional but recommended for additional features.
+        choice /C YN /N /M "Do you want to install Chocolatey? Press N to exit script (Y/N): "
+        if errorlevel 2 (
+            echo Skipping Chocolatey installation.
+        ) else (
+            call :installChoco
+        )
     )
 )
 exit /B 0
@@ -382,7 +349,8 @@ exit /B 0
 :installChoco
 echo Installing Chocolatey...
 ::powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" >nul
-choco -v > NUL 2>&1 || powershell Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))&&set "path=%path%;C:\ProgramData\chocolatey\bin"
+powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
 where choco >nul 2>&1 || (
     echo [Warning] Chocolatey installation failed.
     exit /B 0
@@ -429,33 +397,23 @@ exit /B
 :: MENU HANDLERS
 :: ========================================================
 
-:fullDeploymentMenu
+:softwareDeploymentMenu
 call "%moduleDir%\software.cmd"
-pause
-goto mainMenu
-
-:officeWindowsMenu
-call "%moduleDir%\office.cmd"
-pause
 goto mainMenu
 
 :utilitiesMenu
 call "%moduleDir%\utils.cmd"
-pause
 goto mainMenu
 
 :packageManagementMenu
 echo Package management console
-pause
 goto mainMenu
 
 :updateCmd
 echo Placeholder for Update Script
-pause
 goto mainMenu
 
 :exit
 cls
 echo Exiting Helpdesk Tools. Goodbye!
-pause
 exit /B 0
