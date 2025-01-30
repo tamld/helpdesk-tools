@@ -85,8 +85,8 @@ if "%pmExit%"=="true" (
     if not "%silentMode%"=="true" pause
     exit /B 1
 )
-goto mainLoop
 
+goto mainLoop
 
 :: ==================
 :: Main Menu and Navigation
@@ -104,13 +104,10 @@ echo    [4] Update CMD                                 : Press 4
 echo    [5] Exit                                       : Press 5
 echo    ========================================================
 
-if "%silentMode%"=="true" (
-    echo Running in Silent Mode. Type 5 and Press Enter to Exit
-)
 choice /N /C 12345 /M "Your choice is: "
 echo.
 
-if %errorlevel% == 5 call :clean & goto exit
+if %errorlevel% == 5 call :clean & goto :exit
 if %errorlevel% == 4 call :updateCmd & goto mainMenu
 if %errorlevel% == 3 goto packageManagementMenu & goto mainMenu
 if %errorlevel% == 2 goto utilitiesMenu & goto mainMenu
@@ -348,9 +345,7 @@ exit /B 0
 
 :installChoco
 echo Installing Chocolatey...
-::powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" >nul
-powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
-set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
+dir /b "C:\ProgramData\chocolatey\bin" >nul 2>&1 && set "PATH=%PATH%;C:\ProgramData\chocolatey\bin" >nul 2>&1 || powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" && set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
 where choco >nul 2>&1 || (
     echo [Warning] Chocolatey installation failed.
     exit /B 0
@@ -416,4 +411,5 @@ goto mainMenu
 :exit
 cls
 echo Exiting Helpdesk Tools. Goodbye!
-exit /B 0
+::if not "%silentMode%"=="true" pause
+exit
