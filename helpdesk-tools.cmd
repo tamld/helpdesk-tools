@@ -1,12 +1,18 @@
 @echo off
-set silentMode=false
+setlocal enabledelayedexpansion
 
-:: Check for silent mode parameter
+:: ============================================================
+:: Helpdesk Tools
+:: ============================================================
+
+:: ----- Global Settings & Silent Mode Check -----
+set "silentMode=false"
 for %%x in (%*) do (
-    if /i "%%x"=="-s" set silentMode=true
-    if /i "%%x"=="--silent" set silentMode=true
+    if /i "%%x"=="-s" set "silentMode=true"
+    if /i "%%x"=="--silent" set "silentMode=true"
 )
 
+:: ----- Check for Administrator Privileges -----
 >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
 if '%errorlevel%' NEQ '0' (
     echo [Error] Please run as Administrator!
@@ -18,7 +24,7 @@ if '%errorlevel%' NEQ '0' (
 pushd "%CD%"
 CD /D "%~dp0"
 
-:: Define directories
+:: ----- Define Directories -----
 set "workDir=%~dp0"
 set "targetDir=%workDir%helpdesk-tools"
 set "configDir=%targetDir%\config"
@@ -26,10 +32,21 @@ set "manifestDir=%targetDir%\manifest"
 set "wingetDir=%manifestDir%\winget"
 set "chocoDir=%manifestDir%\choco"
 set "moduleDir=%targetDir%\modules"
+:: Temporary folder inside targetDir
 set "tempDir=%targetDir%\temp"
-set "projectManifest=%configDir%\project_manifest.json"
 
-:: Initialize temp directory
+:: ----- Setup Log File in targetDir -----
+:: Log file is stored in the helpdesk-tools folder as helpdesk-tools.log
+set "LOGFILE=%targetDir%\helpdesk-tools.log"
+if not exist "%LOGFILE%" (
+    echo [%date% %time%] [INFO] Log file created > "%LOGFILE%"
+) else (
+    echo.>> "%LOGFILE%"
+    echo [%date% %time%] [INFO] New session started >> "%LOGFILE%"
+)
+call :log "[INFO] Starting Helpdesk Tools script"
+
+:: ----- Initialize Directories -----
 if not exist "%targetDir%" (
     mkdir "%targetDir%" || (
         echo [ERROR] Failed to create helpdesk-tools directory
@@ -45,79 +62,138 @@ if not exist "%tempDir%" (
     )
 )
 
-:: Entry Point
+:: ============================================================
+:: ENTRY POINT
+:: ============================================================
 cls
-echo ================================================
-echo          Welcome to Helpdesk Tools
-echo ================================================
+echo ============================================
+echo         WELCOME TO HELPDESK TOOLS
+echo ============================================
+call :log "[INFO] Displayed welcome message"
 
-:: 1. System Validation and OS Info
-echo Checking System Requirements...
+:: ----- Show Disclaimer if Not in Silent Mode -----
+if "%silentMode%"=="true" (
+    echo [INFO] Silent mode enabled: skipping disclaimer.
+    call :log "[INFO] Silent mode: skipping disclaimer"
+) else (
+    call :disclaimer
+)
+
+:: ----- 1. System Validation & OS Information -----
+echo [*] Checking system requirements...
 call :checkRequirements
 if not "%requirementsMet%"=="true" (
-    echo [Error] System does not meet requirements. Exiting...
+    echo.
+    echo [Error] This script cannot run on your system.
+    call :log "[ERROR] System requirements not met. Script cannot run."
     if not "%silentMode%"=="true" pause
     exit /B 1
 )
-echo.
-ping -n 3 localhost > nul
+ping -n 3 localhost >nul
 cls
 
-:: 2. User Agreement
-echo Showing User Disclaimer...
-call :showDisclaimer || exit /B 1
-cls
-
-:: 3. Fetch API, Create Structure, Install Package Managers
-echo Setting up Environment (Fetching Files, Package Managers)...
+:: ----- 3. Environment Setup (Download Repo, Create Structure) -----
+echo [*] Setting up environment...
+call :log "[INFO] Setting up environment"
 call :setupEnvironment
 if "%setupExit%"=="true" (
-    echo [Error] Environment setup was not completed. Exiting...
-     if not "%silentMode%"=="true" pause
-    exit /B 1
-)
-cls
-
-:: Install Package Managers
-call :checkPackageManagers
-if "%pmExit%"=="true" (
-    echo [Error] Winget or Chocolatey setup was not completed. Exiting...
+    echo [Error] Environment setup failed. Exiting...
+    call :log "[ERROR] Environment setup failed."
     if not "%silentMode%"=="true" pause
     exit /B 1
 )
-
-goto mainLoop
-
-:: ==================
-:: Main Menu and Navigation
-:mainLoop
-call :mainMenu
-goto mainLoop
-
-:mainMenu
 cls
-echo    ========================================================
-echo    [1] Software Deployment                         : Press 1
-echo    [2] System Utilities                           : Press 2
-echo    [3] Package Management                         : Press 3
-echo    [4] Update CMD                                 : Press 4
-echo    [5] Exit                                       : Press 5
-echo    ========================================================
 
-choice /N /C 12345 /M "Your choice is: "
+:: ----- 4. Package Managers Check & Installation -----
+:: In silent mode, auto-install missing package managers.
+:: In non-silent mode, prompt the user.
+call :checkPackageManagers
+if "%pmExit%"=="true" (
+    echo [Error] Winget or Chocolatey installation failed. Exiting...
+    call :log "[ERROR] Package managers installation failed."
+    if not "%silentMode%"=="true" pause
+    exit /B 1
+)
+call :log "[INFO] Package managers check completed"
+
+:: ----- Refresh environment variables after installing package managers -----
+::call :refreshEnv
+
+:: ============================================================
+:: MAIN MENU (Enhanced Interface)
+:: ============================================================
+:mainLoop
+cls
+echo ============================================
+echo               MAIN MENU
+echo ============================================
 echo.
+echo   [1] Software Deployment
+echo   [2] System Utilities
+echo   [3] Package Management
+echo   [4] Update CMD
+echo   [5] Exit
+echo.
+choice /C 12345 /N /M "Enter your choice: "
+echo.
+if %errorlevel% == 5 (
+    call :log "[INFO] User selected: Exit"
+    call :clean 
+    goto :exit
+)
+if %errorlevel% == 4 (
+    call :log "[INFO] User selected: Update CMD"
+    call :updateCmd 
+    goto mainLoop
+)
+if %errorlevel% == 3 (
+    call :log "[INFO] User selected: Package Management"
+    goto packageManagementMenu
+)
+if %errorlevel% == 2 (
+    call :log "[INFO] User selected: System Utilities"
+    goto utilitiesMenu
+)
+if %errorlevel% == 1 (
+    call :log "[INFO] User selected: Software Deployment"
+    goto softwareDeploymentMenu
+)
+goto mainLoop
 
-if %errorlevel% == 5 call :clean & goto :exit
-if %errorlevel% == 4 call :updateCmd & goto mainMenu
-if %errorlevel% == 3 goto packageManagementMenu & goto mainMenu
-if %errorlevel% == 2 goto utilitiesMenu & goto mainMenu
-if %errorlevel% == 1 goto softwareDeploymentMenu & goto mainMenu
-goto mainMenu
+:: ============================================================
+:: LABEL: Disclaimer
+:: Displays the disclaimer and prompts user to confirm.
+:: ============================================================
+:disclaimer
+cls
+echo ============================================
+echo              DISCLAIMER
+echo ============================================
+echo.
+echo This script is designed to support helpdesk operations by:
+echo   - Installing Winget and optionally Chocolatey.
+echo   - Modifying system settings to improve configuration.
+echo.
+echo Please be aware that:
+echo   - The script may change system settings and install software packages.
+echo   - All modifications are intended solely for helpdesk purposes.
+echo   - The full source code is publicly available for review.
+echo   - The author does not intend to cause harm, damage, or disrupt normal system operations.
+echo   - Use this script only after thorough review and at your own risk.
+echo   - The author disclaims any liability for any adverse effects or damages.
+echo.
+choice /C YN /N /M "Do you agree to proceed? (Y/N): "
+if errorlevel 2 (
+    echo [*] You chose NOT to proceed. Exiting...
+    call :log "[INFO] User declined disclaimer. Exiting."
+    exit /B 1
+)
+cls
+exit /B 0
 
-:: ========================================================
-:: Function Definitions
-:: ========================================================
-
+:: ============================================================
+:: FUNCTION: Check System Requirements
+:: ============================================================
 :checkRequirements
 cls
 echo Checking system requirements...
@@ -131,7 +207,7 @@ echo   Build Number    : %build_number%
 echo   OS Architecture : %os_arch%
 
 if %build_number% LSS 17763 (
-    echo [Error] Requires Windows 10 1809+ or Windows 11
+    echo [Error] Requires Windows 10 1809+ or Windows 11.
     set "requirementsMet=false"
 )
 if /i "%os_arch%"=="ARM64" (
@@ -145,145 +221,96 @@ if "%requirementsMet%"=="true" (
 
 exit /B 0
 
-:showDisclaimer
-cls
-echo IMPORTANT: This script uses Winget and optionally Chocolatey.
-echo SECURITY WARNING: Running scripts involves risks.
-echo - Script modifications are your responsibility.
-echo - This script will install software and change system settings.
-echo - The author is not liable for any issues.
-echo - No harm is intended by the script author.
-echo.
-
-if "%silentMode%"=="true" (
-    echo Proceeding with script execution in silent mode as disclaimer is assumed to be accepted.
-    exit /B 0
-) else (
-    choice /C YN /N /M "Do you agree to proceed? (Y/N): "
-    if errorlevel 2 (
-        echo You chose NOT to proceed. Exiting...
-        exit /B 1
-    )
-    exit /B 0
-)
-
+:: ============================================================
+:: FUNCTION: Setup Environment (Download Repo & Create Structure)
+:: ============================================================
 :setupEnvironment
 set "setupExit=false"
 set "REPO_URL=https://github.com/tamld/helpdesk-tools/archive/refs/heads/main.zip"
-set "ZIP_FILE=%temp%\repo.zip"
+set "ZIP_FILE=%tempDir%\repo.zip"
 set "EXTRACT_DIR=%tempDir%\repo"
 
-:: Create temp directory
-if not exist "%tempDir%" (
-    mkdir "%tempDir%" || (
-        echo [ERROR] Failed to create temp directory
-        if not "%silentMode%"=="true" pause
-        set "setupExit=true"
-        exit /B 1
-    )
-)
-
-:: Delete old content
-echo Deleting old content from target directory...
-if exist "%targetDir%" (
-    for /f "delims=" %%i in ('dir /b /ad "%targetDir%"') do (
-        rd /s /q "%targetDir%\%%i"
-    )
-     for /f "delims=" %%i in ('dir /b "%targetDir%"') do (
-       if not "%%i"=="temp" if not "%%i"=="helpdesk-tools.cmd" del /f /q "%targetDir%\%%i"
-    )
-)
-
-:: Download ZIP file with try-catch
-echo [1/2] Downloading repository ZIP file...
+echo [*] Downloading repository ZIP file...
+call :log "[INFO] Downloading repository from %REPO_URL%"
 powershell -NoProfile -Command ^
-    "try { " ^
-    "   $ProgressPreference='SilentlyContinue'; " ^
-    "   Invoke-WebRequest -Uri '%REPO_URL%' -OutFile '%ZIP_FILE%' -ErrorAction Stop; " ^
-    "} catch { " ^
-    "   Write-Host '[ERROR] Failed to download repository ZIP file: ' $_.Exception.Message; " ^
-    "   exit 1; " ^
-    "}"
+    "try { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%REPO_URL%' -OutFile '%ZIP_FILE%' -ErrorAction Stop; } catch { Write-Host '[ERROR] Failed to download repo ZIP:' $_.Exception.Message; exit 1; }"
 if %errorlevel% neq 0 (
     set "setupExit=true"
+    call :log "[ERROR] Failed to download repository ZIP file."
     exit /B 1
 )
 
-:: Extract ZIP file with try-catch
-echo [2/2] Extracting repository ZIP file...
+echo [*] Extracting repository ZIP file...
+call :log "[INFO] Extracting repository ZIP file"
 powershell -NoProfile -Command ^
-    "try { " ^
-    "   Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force -ErrorAction Stop; " ^
-    "} catch { " ^
-     "   Write-Host '[ERROR] Failed to extract repository ZIP file: ' $_.Exception.Message; " ^
-    "   exit 1; " ^
-    "}"
+    "try { Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force -ErrorAction Stop; } catch { Write-Host '[ERROR] Failed to extract repo ZIP:' $_.Exception.Message; exit 1; }"
 if %errorlevel% neq 0 (
     set "setupExit=true"
+    call :log "[ERROR] Failed to extract repository ZIP file."
     del "%ZIP_FILE%"
     exit /B 1
 )
 
-:: Delete the zip file
-del "%ZIP_FILE%"
-
-:: Move extracted content to target dir
+:: Move extracted content to targetDir and remove temporary folders
 for /d %%d in ("%EXTRACT_DIR%\helpdesk-tools-main\*") do move "%%d" "%targetDir%" >nul
 for %%f in ("%EXTRACT_DIR%\helpdesk-tools-main\*") do move "%%f" "%targetDir%" >nul
 rd /s /q "%EXTRACT_DIR%\helpdesk-tools-main"
-
-:: Create project_manifest.json
-echo Creating project_manifest.json...
-powershell -NoProfile -Command ^
-    "$manifest = @{ 'downloaded_at' = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ');};" ^
-    "$manifest | ConvertTo-Json -Depth 4 | Out-File '%projectManifest%' -Encoding UTF8;"
-
+rd /s /q "%EXTRACT_DIR%"
+del "%ZIP_FILE%"
+call :log "[INFO] Environment setup completed"
 exit /B 0
 
-
+:: ============================================================
+:: FUNCTION: Check & Install Package Managers
+:: ============================================================
 :checkPackageManagers
 set "pmExit=false"
 set "wingetInstalled=false"
 set "chocoInstalled=false"
 
 :: Check for Winget
-where winget > nul 2>&1
+where winget >nul 2>&1
 if %ERRORLEVEL%==0 (
-    echo Winget is found on this system.
+    echo [*] Winget is installed.
     set "wingetInstalled=true"
+    call :log "[INFO] Winget is already installed."
 ) else (
-	cls
-    echo Winget is required for core functionality.
+    cls
+    echo [*] Winget is required.
     if "%silentMode%"=="true" (
-        echo Silent mode: Proceeding with Winget installation.
-        call :installWinget  :: Directly call installWinget which now includes XAML
+        echo [*] Silent mode: auto installing Winget.
+        call :log "[INFO] Silent mode: auto installing Winget."
+        call :installWinget
     ) else (
-        choice /C YN /N /M "Do you want to install Winget? Press N to exit script (Y/N): "
+        choice /C YN /N /M "Install Winget? (Y/N): "
         if errorlevel 2 (
-            echo [Error] Winget is not installed. Cannot proceed.
+            echo [Error] Winget is not installed. Exiting.
+            call :log "[ERROR] User declined Winget installation. Exiting."
             set "pmExit=true"
             exit /B 1
         ) else (
-            call :installWinget  :: Directly call installWinget which now includes XAML
+            call :installWinget
         )
     )
 )
 
 :: Check for Chocolatey
-where choco > nul 2>&1
+where choco >nul 2>&1
 if %ERRORLEVEL%==0 (
-    echo Chocolatey is found on this system.
+    echo [*] Chocolatey is installed.
     set "chocoInstalled=true"
+    call :log "[INFO] Chocolatey is already installed."
 ) else (
-  if "%silentMode%"=="true" (
-       echo Chocolatey is not found on this system.
-        echo Silent mode: Proceeding with Chocolatey installation.
+    if "%silentMode%"=="true" (
+        echo [*] Silent mode: auto installing Chocolatey.
+        call :log "[INFO] Silent mode: auto installing Chocolatey."
         call :installChoco
-     ) else (
-        echo Chocolatey is optional but recommended for additional features.
-        choice /C YN /N /M "Do you want to install Chocolatey? Press N to exit script (Y/N): "
+    ) else (
+        echo [*] Chocolatey is optional.
+        choice /C YN /N /M "Install Chocolatey? (Y/N): "
         if errorlevel 2 (
-            echo Skipping Chocolatey installation.
+            echo [*] Skipping Chocolatey installation.
+            call :log "[INFO] User skipped Chocolatey installation."
         ) else (
             call :installChoco
         )
@@ -291,69 +318,109 @@ if %ERRORLEVEL%==0 (
 )
 exit /B 0
 
-
+:: ============================================================
+:: FUNCTION: Install Winget (Dependencies & Core) from GitHub
+:: ============================================================
 :installWinget
-echo Installing Winget and required components...
+echo [*] Fetching latest Winget release information from GitHub...
+call :log "[INFO] Fetching latest Winget release information from GitHub"
+set "GITHUB_API_URL=https://api.github.com/repos/microsoft/winget-cli/releases/latest"
 
-:: Install XAML Framework
-echo Checking Microsoft.UI.Xaml requirements...
-where winget >nul 2>&1 && goto installWingetCore  :: If winget exists, skip XAML install
-
-:: Get latest stable version
-echo Fetching latest Microsoft.UI.Xaml version...
-for /f "delims=" %%v in ('powershell -NoProfile -Command "(Invoke-RestMethod 'https://api.nuget.org/v3-flatcontainer/microsoft.ui.xaml/index.json').versions | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | Sort-Object -Descending | Select-Object -First 1"') do set "XAML_VERSION=%%v"
-
-if "%XAML_VERSION%"=="" (
-    echo [Error] Failed to fetch Microsoft.UI.Xaml version.
-    exit /B 1
+:: Get the MSIXBUNDLE File URL
+for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command " (Invoke-RestMethod -Uri '%GITHUB_API_URL%' -Headers @{ 'User-Agent'='winget-installer' }).assets | Where-Object { $_.name -like 'Microsoft.DesktopAppInstaller_*.msixbundle' } | Select-Object -First 1 -ExpandProperty browser_download_url"`) do (
+    set "MSIXBUNDLE_URL=%%i"
 )
 
-echo Latest stable version: %XAML_VERSION%
+:: Get the DesktopAppInstaller_Dependencies.zip File URL
+for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command " (Invoke-RestMethod -Uri '%GITHUB_API_URL%' -Headers @{ 'User-Agent'='winget-installer' }).assets | Where-Object { $_.name -eq 'DesktopAppInstaller_Dependencies.zip' } | Select-Object -First 1 -ExpandProperty browser_download_url"`) do (
+    set "DEP_ZIP_URL=%%i"
+)
 
-:: Download and install XAML
-set "xamlUrl=https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/%XAML_VERSION%"
-set "xamlPackage=%tempDir%\xaml.zip"
+echo.
+echo [*] Detected Assets:
+echo     Dependencies ZIP: %DEP_ZIP_URL%
+echo     Main Package: %MSIXBUNDLE_URL%
+echo.
+call :log "[INFO] Detected Winget assets: Main Package: %MSIXBUNDLE_URL%, Dependencies: %DEP_ZIP_URL%"
 
-echo Downloading Microsoft.UI.Xaml...
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%xamlUrl%' -OutFile '%xamlPackage%'"
+:: Define local filenames & folders in %tempDir%
+set "MSIXBUNDLE_FILE=%tempDir%\Microsoft.DesktopAppInstaller.msixbundle"
+set "DEP_ZIP_FILE=%tempDir%\DesktopAppInstaller_Dependencies.zip"
+set "DEP_FOLDER=%tempDir%\DesktopAppInstaller_Dependencies"
 
-echo Extracting package...
-powershell -Command "Expand-Archive -Path '%xamlPackage%' -DestinationPath '%tempDir%\xaml' -Force"
+:: Download files using Start-BitsTransfer
+echo [*] Downloading Winget package...
+call :log "[INFO] Downloading Winget package..."
+powershell -NoProfile -Command "Start-BitsTransfer -Source \"%MSIXBUNDLE_URL%\" -Destination \"%MSIXBUNDLE_FILE%\""
+echo [*] Downloading dependencies ZIP file...
+call :log "[INFO] Downloading dependencies ZIP file..."
+powershell -NoProfile -Command "Start-BitsTransfer -Source \"%DEP_ZIP_URL%\" -Destination \"%DEP_ZIP_FILE%\""
 
+:: Extract Dependencies ZIP
+echo [*] Extracting dependencies...
+call :log "[INFO] Extracting dependencies..."
+powershell -NoProfile -Command "Expand-Archive -Path '%DEP_ZIP_FILE%' -DestinationPath '%DEP_FOLDER%' -Force"
+
+:: Determine System Architecture
 set "arch=x64"
-if "%PROCESSOR_ARCHITECTURE%"=="x86" set "arch=x86"
-if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "arch=arm64"
+if /I "%PROCESSOR_ARCHITECTURE%"=="x86" set "arch=x86"
+if /I "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "arch=x64"
+if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "arch=arm64"
+echo [*] Detected Architecture: %arch%
+call :log "[INFO] Detected architecture: %arch%"
 
-echo Installing Microsoft.UI.Xaml for %arch% architecture...
-powershell -Command "Add-AppxPackage -Path '%tempDir%\xaml\tools\AppX\%arch%\Release\Microsoft.UI.Xaml.2.8.appx'"
-del /q "%xamlPackage%" 2>nul
-:: End XAML Installation
+:: Install Dependency Packages (.appx files)
+echo [*] Installing dependency packages...
+for /r "%DEP_FOLDER%\%arch%" %%f in (*.appx) do (
+    echo  Installing: %%f
+    powershell -NoProfile -Command "Add-AppxPackage -Path '%%~f'"
+)
 
-:installWingetCore
-echo Installing Winget...
-set "wingetBundle=%tempDir%\winget.msixbundle"
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%wingetBundle%'"
-powershell -Command "Add-AppxPackage -Path '%wingetBundle%' -ForceApplicationShutdown"
-set "PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WindowsApps"
-del /q "%wingetBundle%" 2>nul
-rd /q /s %tempDir%\xaml
-where winget >nul 2>&1 || (
-    echo [Error] Failed to install Winget.
+:: Install the Main Winget Package
+echo [*] Installing Winget package...
+powershell -NoProfile -Command "Add-AppxPackage -Path '%MSIXBUNDLE_FILE%'"
+
+:: Cleanup downloaded files & folders from %tempDir%
+echo [*] Cleaning up Winget installer files...
+if exist "%MSIXBUNDLE_FILE%" del /f /q "%MSIXBUNDLE_FILE%"
+if exist "%DEP_ZIP_FILE%" del /f /q "%DEP_ZIP_FILE%"
+if exist "%DEP_FOLDER%" rd /s /q "%DEP_FOLDER%"
+call :log "[INFO] Winget installation completed"
+exit /B 0
+
+:: ============================================================
+:: FUNCTION: Install Chocolatey
+:: ============================================================
+:installChoco
+echo [*] Installing Chocolatey...
+call :log "[INFO] Installing Chocolatey"
+echo Installing Chocolatey...
+:: Check if Chocolatey is already installed
+if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
+    echo [*] Chocolatey installation found.
+) else (
+    powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+)
+if exist "C:\ProgramData\chocolatey\bin" (
+    set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
+    if exist "C:\ProgramData\chocolatey\bin\refreshenv.cmd" (
+        "c:\ProgramData\chocolatey\bin\RefreshEnv.cmd"
+    ) else (
+        echo [Warning] Chocolatey installation failed to update PATH.
+    )
+) else (
+    echo [Warning] Chocolatey installation failed.
+    call :log "[WARNING] Chocolatey installation failed."
     exit /B 1
 )
+call :log "[INFO] Chocolatey installation completed"
 exit /B 0
 
-:installChoco
-echo Installing Chocolatey...
-dir /b "C:\ProgramData\chocolatey\bin" >nul 2>&1 && set "PATH=%PATH%;C:\ProgramData\chocolatey\bin" >nul 2>&1 || powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" && set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
-where choco >nul 2>&1 || (
-    echo [Warning] Chocolatey installation failed.
-    exit /B 0
-)
-exit /B 0
-
+:: ============================================================
+:: FUNCTION: Validate Directory Structure
+:: ============================================================
 :validateStructure
-echo Validating directory structure...
+echo [*] Validating directory structure...
 set "errorFlag=0"
 set "items=%configDir% %manifestDir% %wingetDir% %chocoDir% %moduleDir%"
 set "categories=software office utils"
@@ -369,47 +436,119 @@ for %%I in (%items%) do (
 )
 if %errorFlag%==1 (
     echo [Error] Directory structure is invalid.
+    call :log "[ERROR] Directory structure is invalid."
     exit /B 1
 )
+call :log "[INFO] Directory structure validated successfully"
 exit /B 0
 
+:: ============================================================
+:: FUNCTION: Clean Temporary Files
+:: ============================================================
 :clean
-echo Cleaning temporary files...
+echo [*] Cleaning temporary files...
 if exist "%tempDir%" rd /s /q "%tempDir%" >nul
-if exist "%tempDir%\xaml" rd /s /q "%tempDir%\xaml" >nul
-echo Temporary files removed
+echo [*] Temporary files removed.
+call :log "[INFO] Cleaned temporary files."
 exit /B 0
 
+:: ============================================================
+:: FUNCTION: Elevate Privileges (UAC)
+:: ============================================================
 :goUac
-echo Elevating privileges...
-echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
-echo UAC.ShellExecute "cmd.exe", "/c %~s0 %*", "", "runas", 1 >> "%temp%\getadmin.vbs"
-"%temp%\getadmin.vbs"
-del "%temp%\getadmin.vbs"
+echo [*] Elevating privileges...
+echo Set UAC = CreateObject^("Shell.Application"^) > "%tempDir%\getadmin.vbs"
+echo UAC.ShellExecute "cmd.exe", "/c %~s0 %*", "", "runas", 1 >> "%tempDir%\getadmin.vbs"
+"%tempDir%\getadmin.vbs"
+del "%tempDir%\getadmin.vbs"
 exit /B
 
-:: ========================================================
+:: ============================================================
 :: MENU HANDLERS
-:: ========================================================
-
+:: ============================================================
 :softwareDeploymentMenu
+call :log "[INFO] Entering Software Deployment Menu"
 call "%moduleDir%\software.cmd"
-goto mainMenu
+goto mainLoop
 
 :utilitiesMenu
+call :log "[INFO] Entering System Utilities Menu"
 call "%moduleDir%\utils.cmd"
-goto mainMenu
+goto mainLoop
 
 :packageManagementMenu
-echo Package management console
-goto mainMenu
+echo [*] Package Management Console
+call :log "[INFO] Entering Package Management Menu"
+goto mainLoop
 
 :updateCmd
-echo Placeholder for Update Script
-goto mainMenu
+echo [*] Placeholder for Update Script
+call :log "[INFO] Update CMD selected (placeholder)"
+goto mainLoop
 
 :exit
 cls
-echo Exiting Helpdesk Tools. Goodbye!
-::if not "%silentMode%"=="true" pause
+echo [*] Exiting Helpdesk Tools. Goodbye!
+call :log "[INFO] Exiting Helpdesk Tools."
 exit
+
+:: ============================================================
+:: FUNCTION: Log Message with Timestamp
+:: Usage: call :log "Your message here"
+:: ============================================================
+:log
+setlocal EnableDelayedExpansion
+set "msg=%*"
+echo %date% %time% - !msg! >> "%LOGFILE%"
+endlocal & exit /B 0
+
+:: ============================================================
+:: LABEL: refreshEnv
+:: Refresh environment variables from registry and update current CMD session.
+:: Temporary files are stored in %tempDir%.
+:: ============================================================
+:refreshEnv
+setlocal EnableDelayedExpansion
+
+echo Refreshing environment variables from registry. Please wait...
+
+:: --- Begin: Inline functions from RefreshEnv.cmd ---
+:: Function: SetFromReg
+:SetFromReg
+    "%WinDir%\System32\Reg" QUERY "%~1" /v "%~2" > "%tempDir%\_envset.tmp" 2>NUL
+    for /f "usebackq skip=2 tokens=2,*" %%A in ("%tempDir%\_envset.tmp") do (
+        set "%%~3=%%B"
+    )
+    goto :EOF
+
+:: Function: GetRegEnv
+:GetRegEnv
+    "%WinDir%\System32\Reg" QUERY "%~1" > "%tempDir%\_envget.tmp"
+    for /f "usebackq skip=2" %%A in ("%tempDir%\_envget.tmp") do (
+        if /I not "%%~A"=="Path" (
+            call :SetFromReg "%~1" "%%~A" "%%~A"
+        )
+    )
+    goto :EOF
+:: --- End: Inline functions ---
+
+:: Create a temporary batch file with environment variable settings in %tempDir%
+>"%tempDir%\_env.cmd" echo @echo off
+call :GetRegEnv "HKLM\System\CurrentControlSet\Control\Session Manager\Environment" >> "%tempDir%\_env.cmd"
+call :GetRegEnv "HKCU\Environment" >> "%tempDir%\_env.cmd"
+
+:: Special handling for PATH: combine system and user PATH
+call :SetFromReg "HKLM\System\CurrentControlSet\Control\Session Manager\Environment" Path Path_HKLM >> "%tempDir%\_env.cmd"
+call :SetFromReg "HKCU\Environment" Path Path_HKCU >> "%tempDir%\_env.cmd"
+>> "%tempDir%\_env.cmd" echo set "Path=%%Path_HKLM%%;%%Path_HKCU%%"
+
+:: Cleanup temporary files used for registry query
+del /f /q "%tempDir%\_envset.tmp" 2>nul
+del /f /q "%tempDir%\_envget.tmp" 2>nul
+
+:: Apply the environment variable changes
+call "%tempDir%\_env.cmd"
+del /f /q "%tempDir%\_env.cmd" 2>nul
+
+echo Environment variables refreshed.
+endlocal & goto :EOF
