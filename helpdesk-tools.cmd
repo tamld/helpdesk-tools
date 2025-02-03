@@ -1,7 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
-:: Force CR+LF encoding
-:: ============================================================
+:: No global delayed expansion is set.
 :: Helpdesk Tools
 :: ============================================================
 
@@ -116,7 +114,7 @@ if "%pmExit%"=="true" (
 )
 call :log "[INFO] Package managers check completed"
 
-:: ----- Refresh environment variables after installing package managers -----
+:: ----- (Optional) Refresh environment variables ----- 
 ::call :refreshEnv
 
 :: ============================================================
@@ -162,7 +160,6 @@ goto mainLoop
 
 :: ============================================================
 :: LABEL: Disclaimer
-:: Displays the disclaimer and prompts user to confirm.
 :: ============================================================
 :disclaimer
 cls
@@ -394,19 +391,13 @@ exit /B 0
 :installChoco
 echo [*] Checking if Chocolatey is installed...
 call :log "[INFO] Checking if Chocolatey is installed"
-
-:: Check if Chocolatey is installed by verifying the existence of choco.exe
 if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
     echo [*] Chocolatey is already installed. Skipping installation.
     call :log "[INFO] Chocolatey is already installed. Skipping installation."
     goto :eof
 )
-
 echo [*] Installing Chocolatey...
-:: Run the Chocolatey installation script via PowerShell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
-
-:: Verify the installation by checking for choco.exe
 if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
     echo [*] Chocolatey installation completed successfully.
     call :log "[INFO] Chocolatey installation completed successfully."
@@ -417,7 +408,6 @@ if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
     call :log "[WARNING] Chocolatey installation failed."
     exit /B 1
 )
-
 exit /B 0
 
 :: ============================================================
@@ -461,6 +451,7 @@ exit /B 0
 :: ============================================================
 :goUac
 echo [*] Elevating privileges...
+if not exist "%tempDir%" mkdir "%tempDir%"
 echo Set UAC = CreateObject^("Shell.Application"^) > "%tempDir%\getadmin.vbs"
 echo UAC.ShellExecute "cmd.exe", "/c %~s0 %*", "", "runas", 1 >> "%tempDir%\getadmin.vbs"
 "%tempDir%\getadmin.vbs"
@@ -499,9 +490,9 @@ exit
 :: ============================================================
 :: FUNCTION: Log Message with Timestamp
 :: Usage: call :log "Your message here"
-:: ============================================================
+:: Local delayed expansion is enabled here.
 :log
-setlocal EnableDelayedExpansion
+setlocal enabledelayedexpansion
 set "msg=%*"
 echo %date% %time% - !msg! >> "%LOGFILE%"
 endlocal & exit /B 0
@@ -509,15 +500,12 @@ endlocal & exit /B 0
 :: ============================================================
 :: LABEL: refreshEnv
 :: Refresh environment variables from registry and update current CMD session.
-:: Temporary files are stored in %tempDir%.
-:: ============================================================
+:: Local delayed expansion enabled.
 :refreshEnv
-setlocal EnableDelayedExpansion
-
+setlocal enabledelayedexpansion
 echo Refreshing environment variables from registry. Please wait...
 
 :: --- Begin: Inline functions from RefreshEnv.cmd ---
-:: Function: SetFromReg
 :SetFromReg
     "%WinDir%\System32\Reg" QUERY "%~1" /v "%~2" > "%tempDir%\_envset.tmp" 2>NUL
     for /f "usebackq skip=2 tokens=2,*" %%A in ("%tempDir%\_envset.tmp") do (
@@ -525,7 +513,6 @@ echo Refreshing environment variables from registry. Please wait...
     )
     goto :EOF
 
-:: Function: GetRegEnv
 :GetRegEnv
     "%WinDir%\System32\Reg" QUERY "%~1" > "%tempDir%\_envget.tmp"
     for /f "usebackq skip=2" %%A in ("%tempDir%\_envget.tmp") do (
@@ -536,7 +523,6 @@ echo Refreshing environment variables from registry. Please wait...
     goto :EOF
 :: --- End: Inline functions ---
 
-:: Create a temporary batch file with environment variable settings in %tempDir%
 >"%tempDir%\_env.cmd" echo @echo off
 call :GetRegEnv "HKLM\System\CurrentControlSet\Control\Session Manager\Environment" >> "%tempDir%\_env.cmd"
 call :GetRegEnv "HKCU\Environment" >> "%tempDir%\_env.cmd"
@@ -546,11 +532,9 @@ call :SetFromReg "HKLM\System\CurrentControlSet\Control\Session Manager\Environm
 call :SetFromReg "HKCU\Environment" Path Path_HKCU >> "%tempDir%\_env.cmd"
 >> "%tempDir%\_env.cmd" echo set "Path=%%Path_HKLM%%;%%Path_HKCU%%"
 
-:: Cleanup temporary files used for registry query
 del /f /q "%tempDir%\_envset.tmp" 2>nul
 del /f /q "%tempDir%\_envget.tmp" 2>nul
 
-:: Apply the environment variable changes
 call "%tempDir%\_env.cmd"
 del /f /q "%tempDir%\_env.cmd" 2>nul
 
