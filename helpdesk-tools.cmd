@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-
+:: Force CR+LF encoding
 :: ============================================================
 :: Helpdesk Tools
 :: ============================================================
