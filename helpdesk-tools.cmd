@@ -392,28 +392,32 @@ exit /B 0
 :: FUNCTION: Install Chocolatey
 :: ============================================================
 :installChoco
-echo [*] Installing Chocolatey...
-call :log "[INFO] Installing Chocolatey"
-echo Installing Chocolatey...
-:: Check if Chocolatey is already installed
+echo [*] Checking if Chocolatey is installed...
+call :log "[INFO] Checking if Chocolatey is installed"
+
+:: Check if Chocolatey is installed by verifying the existence of choco.exe
 if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
-    echo [*] Chocolatey installation found.
-) else (
-    powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+    echo [*] Chocolatey is already installed. Skipping installation.
+    call :log "[INFO] Chocolatey is already installed. Skipping installation."
+    goto :eof
 )
-if exist "C:\ProgramData\chocolatey\bin" (
+
+echo [*] Installing Chocolatey...
+:: Run the Chocolatey installation script via PowerShell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+
+:: Verify the installation by checking for choco.exe
+if exist "C:\ProgramData\chocolatey\bin\choco.exe" (
+    echo [*] Chocolatey installation completed successfully.
+    call :log "[INFO] Chocolatey installation completed successfully."
     set "PATH=%PATH%;C:\ProgramData\chocolatey\bin"
-    if exist "C:\ProgramData\chocolatey\bin\refreshenv.cmd" (
-        "c:\ProgramData\chocolatey\bin\RefreshEnv.cmd"
-    ) else (
-        echo [Warning] Chocolatey installation failed to update PATH.
-    )
+    goto :eof
 ) else (
     echo [Warning] Chocolatey installation failed.
     call :log "[WARNING] Chocolatey installation failed."
     exit /B 1
 )
-call :log "[INFO] Chocolatey installation completed"
+
 exit /B 0
 
 :: ============================================================
